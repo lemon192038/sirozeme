@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>KINGDOMS OF CONQUEST</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:#1a2230;color:#f3ecd8;font-family:system-ui,sans-serif;touch-action:none;user-select:none}
+#view{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+button,select{font:inherit;color:inherit;background:#2b3548cc;border:1px solid #c9a95a;border-radius:8px;padding:8px 12px;min-height:40px}
+button:active{background:#c9a95a55}
+#topbar{position:fixed;top:0;left:0;right:0;display:flex;gap:14px;align-items:center;padding:6px 12px;padding-top:max(6px,env(safe-area-inset-top));background:linear-gradient(#10151fe6,#10151f99);font-size:15px;overflow-x:auto;white-space:nowrap}
+#topbar .grow{margin-left:auto}
+.panel{position:fixed;top:56px;width:min(260px,70vw);max-height:50vh;overflow:auto;padding:10px 14px;background:#10151fdd;border:1px solid #c9a95a88;border-radius:10px;transition:transform .2s}
+#left{left:8px}#right{right:8px}
+#left.closed{transform:translateX(-120%)}#right.closed{transform:translateX(120%)}
+.panel h3{margin:0 0 6px;color:#e6c673}.note{opacity:.75;font-size:13px;margin:0}
+#toggles{position:fixed;right:8px;bottom:70px;display:flex;flex-direction:column;gap:6px}
+#toggles{bottom:calc(60px + env(safe-area-inset-bottom))}
+#bottom{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;padding-bottom:max(10px,env(safe-area-inset-bottom));background:linear-gradient(#10151f99,#10151fe6);font-size:14px}
+#settings{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(320px,90vw);padding:16px;background:#10151ff2;border:1px solid #c9a95a;border-radius:12px;display:flex;flex-direction:column;gap:10px}
+#settings label{display:flex;justify-content:space-between;align-items:center}
+.hidden{display:none!important}
+#loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#10151f;letter-spacing:.3em;transition:opacity .5s}
+#loading.done{opacity:0;pointer-events:none}
+
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<header id="topbar">
+  <span class="res" title="金貨">🪙 <b id="r-gold">--</b></span>
+  <span class="res" title="食料">🌾 <b id="r-food">--</b></span>
+  <span class="res" title="木材">🪵 <b id="r-wood">--</b></span>
+  <span class="res" title="石材">🪨 <b id="r-stone">--</b></span>
+  <span class="res" title="鉄">⛓ <b id="r-iron">--</b></span>
+  <span class="res" title="人口">👥 <b id="r-pop">--</b></span>
+  <span class="res grow" id="clock">Day 1 08:00</span>
+  <button id="btn-settings">⚙</button>
+</header>
+<aside id="left" class="panel"><h3>内政</h3><p class="note">建築・住民・資源・経済・研究は STAGE 2 で実装予定です。</p></aside>
+<aside id="right" class="panel"><h3>軍事</h3><p class="note">軍隊・防衛・ワールドマップは STAGE 3 以降で実装予定です。</p></aside>
+<div id="toggles">
+  <button data-t="left">内政</button><button data-t="right">軍事</button>
+  <button id="rot-l">⟲</button><button id="rot-r">⟳</button><button id="zoom-in">＋</button><button id="zoom-out">－</button>
+</div>
+<footer id="bottom"><span id="info">地形をタップすると情報を表示します</span></footer>
+<div id="settings" class="hidden">
+  <h3>グラフィック設定</h3>
+  <label>品質
+    <select id="quality"><option value="low">低</option><option value="mid">中</option><option value="high">高</option><option value="ultra">最高</option></select>
+  </label>
+  <label>フレーム制限
+    <select id="fps"><option value="0">無制限</option><option value="30">30</option><option value="60">60</option></select>
+  </label>
+  <p class="note">※アンチエイリアスは次回起動時に反映</p>
+  <button id="settings-close">閉じる</button>
+</div>
+<div id="loading">LOADING...</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'three';
+
+const WORLD_SIZE = 240;
+const WATER_LEVEL = 0;
+
+function hash(ix, iz, seed) {
+  let h = ix * 374761393 + iz * 668265263 + seed * 2147483647;
+  h = (h ^ (h >>> 13)) * 1274126177;
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+}
+function vnoise(x, z, seed) {
+  const ix = Math.floor(x), iz = Math.floor(z), fx = x - ix, fz = z - iz;
+  const u = fx * fx * (3 - 2 * fx), v = fz * fz * (3 - 2 * fz);
+  const a = hash(ix, iz, seed), b = hash(ix + 1, iz, seed), c = hash(ix, iz + 1, seed), d = hash(ix + 1, iz + 1, seed);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function fbm(x, z, seed, oct = 4) {
+  let s = 0, amp = 0.5, f = 1;
+  for (let i = 0; i < oct; i++) { s += vnoise(x * f, z * f, seed + i * 17) * amp; amp *= 0.5; f *= 2; }
+  return s;
+}
+
+class Terrain {
+  constructor(seed = 1234) {
+    this.seed = seed;
+    this.group = new THREE.Group();
+    this.build();
+  }
+
+  /** 高さ関数（カメラ・将来の建築判定でも使用）。中心は城用に平坦化。 */
+  heightAt(x, z) {
+    const n = fbm(x * 0.02, z * 0.02, this.seed);
+    const m = Math.pow(fbm(x * 0.012 + 50, z * 0.012 + 50, this.seed + 9), 2.2);
+    let h = (n - 0.42) * 26 + m * 60;
+    const d = Math.hypot(x, z), flat = 1 - THREE.MathUtils.smoothstep(d, 18, 42);
+    h = h * (1 - flat) + 2.2 * flat;
+    const edge = THREE.MathUtils.smoothstep(Math.max(Math.abs(x), Math.abs(z)), WORLD_SIZE * 0.4, WORLD_SIZE * 0.5);
+    return h * (1 - edge) - 6 * edge;
+  }
+
+  biomeAt(x, z, h) {
+    const slope = Math.abs(this.heightAt(x + 1.5, z) - h) + Math.abs(this.heightAt(x, z + 1.5) - h);
+    if (h < WATER_LEVEL + 0.2) return 'water';
+    if (h < WATER_LEVEL + 0.9) return 'sand';
+    if (h > 24) return 'peak';
+    if (slope > 2.6 || h > 15) return 'rock';
+    return fbm(x * 0.05 + 9, z * 0.05 - 4, this.seed + 3) > 0.55 ? 'forest' : 'grass';
+  }
+
+  build() {
+    const seg = 200, geo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, seg, seg);
+    geo.rotateX(-Math.PI / 2);
+    const pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
+    const palette = {
+      water: 0x2f6f8f, sand: 0xd8c48a, grass: 0x6fa04a, forest: 0x4d8a3a, rock: 0x7d7a74, peak: 0xf0f0f4
+    };
+    const c = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i), h = this.heightAt(x, z);
+      pos.setY(i, h);
+      c.setHex(palette[this.biomeAt(x, z, h)]);
+      const j = 0.94 + hash(Math.round(x * 3), Math.round(z * 3), 7) * 0.12; // 色ムラ
+      col.set([c.r * j, c.g * j, c.b * j], i * 3);
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.computeVertexNormals();
+    const land = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true }));
+    land.receiveShadow = true;
+    this.land = land;
+    this.group.add(land);
+
+    const water = new THREE.Mesh(
+      new THREE.PlaneGeometry(WORLD_SIZE * 1.6, WORLD_SIZE * 1.6).rotateX(-Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0x3b86ad, transparent: true, opacity: 0.8, roughness: 0.25, metalness: 0.1 })
+    );
+    water.position.y = WATER_LEVEL;
+    this.group.add(water);
+
+    this.scatter();
+    this.buildCastle();
+  }
+
+  /** 樹木・岩を InstancedMesh で描画（パフォーマンス要件） */
+  scatter() {
+    const trees = [], rocks = [];
+    let s = 99;
+    const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 9000 && trees.length < 2500; i++) {
+      const x = (rnd() - 0.5) * WORLD_SIZE * 0.9, z = (rnd() - 0.5) * WORLD_SIZE * 0.9;
+      if (Math.hypot(x, z) < 30) continue;
+      const h = this.heightAt(x, z), b = this.biomeAt(x, z, h);
+      if (b === 'forest' || (b === 'grass' && rnd() < 0.04)) trees.push([x, h, z, 0.8 + rnd() * 0.8]);
+      else if ((b === 'rock' || b === 'peak') && rnd() < 0.15) rocks.push([x, h, z, 0.6 + rnd() * 1.6]);
+    }
+    const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.15, 0.2, 1, 5), new THREE.MeshStandardMaterial({ color: 0x6b4a2b }), trees.length);
+    const leaf = new THREE.InstancedMesh(new THREE.ConeGeometry(0.9, 2.4, 6), new THREE.MeshStandardMaterial({ color: 0x2f6e35, flatShading: true }), trees.length);
+    const rock = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), new THREE.MeshStandardMaterial({ color: 0x8a8780, flatShading: true }), rocks.length);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3(), e = new THREE.Euler();
+    trees.forEach(([x, h, z, k], i) => {
+      m.compose(p.set(x, h + 0.5 * k, z), q.identity(), sc.set(k, k, k)); trunk.setMatrixAt(i, m);
+      m.compose(p.set(x, h + 1.9 * k, z), q.identity(), sc.set(k, k, k)); leaf.setMatrixAt(i, m);
+    });
+    rocks.forEach(([x, h, z, k], i) => {
+      q.setFromEuler(e.set(rnd() * 3, rnd() * 3, 0));
+      m.compose(p.set(x, h + 0.3 * k, z), q, sc.set(k, k * 0.7, k)); rock.setMatrixAt(i, m);
+    });
+    for (const o of [trunk, leaf, rock]) { o.castShadow = true; o.frustumCulled = false; this.group.add(o); }
+    this.counts = { trees: trees.length, rocks: rocks.length };
+  }
+
+  /** プレースホルダーの城（STAGE 3 で旗占領・防衛システムに置換予定） */
+  buildCastle() {
+    const g = new THREE.Group(), h = this.heightAt(0, 0);
+    const stone = new THREE.MeshStandardMaterial({ color: 0xb8b2a5, flatShading: true });
+    const box = (w, hh, d, x, y, z, mat = stone) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, hh, d), mat);
+      mesh.position.set(x, y + hh / 2, z); mesh.castShadow = mesh.receiveShadow = true; g.add(mesh);
+    };
+    const R = 12;
+    box(R * 2, 3, 1, 0, 0, -R); box(R * 2, 3, 1, 0, 0, R); box(1, 3, R * 2, -R, 0, 0); box(1, 3, R * 2, R, 0, 0);
+    for (const [x, z] of [[-R, -R], [R, -R], [-R, R], [R, R]]) {
+      const t = new THREE.Mesh(new THREE.CylinderGeometry(2, 2.3, 6, 10), stone); t.position.set(x, 3, z); t.castShadow = true; g.add(t);
+      const r = new THREE.Mesh(new THREE.ConeGeometry(2.6, 2.5, 10), new THREE.MeshStandardMaterial({ color: 0x9c3b32 })); r.position.set(x, 7.2, z); r.castShadow = true; g.add(r);
+    }
+    box(6, 6, 6, 0, 0, -5); // 城主の館
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 4, 6), new THREE.MeshStandardMaterial({ color: 0x5a4028 }));
+    pole.position.set(0, 8, -5); g.add(pole);
+    this.flag = new THREE.Mesh(new THREE.PlaneGeometry(2, 1.2, 8, 1), new THREE.MeshStandardMaterial({ color: 0x2b6fd6, side: THREE.DoubleSide }));
+    this.flag.position.set(1, 9.4, -5); g.add(this.flag);
+    g.position.y = h;
+    this.group.add(g);
+  }
+
+  update(t) { // 旗のはためき
+    if (!this.flag) return;
+    const p = this.flag.geometry.attributes.position;
+    for (let i = 0; i < p.count; i++) p.setZ(i, Math.sin(t * 4 + p.getX(i) * 3) * 0.12 * (p.getX(i) + 1));
+    p.needsUpdate = true;
+  }
+}
+
+
+/** アイソメ風の俯瞰カメラ。パン・ズーム・回転（マウス/タッチ/キーボード） */
+class CameraController {
+  constructor(dom, terrain) {
+    this.dom = dom; this.terrain = terrain;
+    this.camera = new THREE.PerspectiveCamera(35, 1, 1, 1200);
+    this.target = new THREE.Vector3(0, 0, 0);
+    this.yaw = Math.PI / 4; this.pitch = THREE.MathUtils.degToRad(52); this.dist = 90;
+    this.minDist = 18; this.maxDist = 260;
+    this.keys = new Set(); this.ptrs = new Map(); this.last = null;
+    this.bind();
+    this.apply();
+  }
+  bind() {
+    const d = this.dom;
+    d.addEventListener('contextmenu', e => e.preventDefault());
+    d.addEventListener('pointerdown', e => { d.setPointerCapture(e.pointerId); this.ptrs.set(e.pointerId, e); this.snap(); this.moved = 0; });
+    d.addEventListener('pointermove', e => this.onMove(e));
+    const up = e => { this.ptrs.delete(e.pointerId); this.snap(); };
+    d.addEventListener('pointerup', e => { if (this.moved < 5 && this.onTap) this.onTap(e); up(e); });
+    d.addEventListener('pointercancel', up);
+    d.addEventListener('wheel', e => { e.preventDefault(); this.zoom(Math.exp(e.deltaY * 0.001)); }, { passive: false });
+    addEventListener('keydown', e => this.keys.add(e.key.toLowerCase()));
+    addEventListener('keyup', e => this.keys.delete(e.key.toLowerCase()));
+  }
+  snap() { // 2点間の状態を記録
+    const p = [...this.ptrs.values()];
+    this.last = p.length === 2 ? { dist: Math.hypot(p[0].clientX - p[1].clientX, p[0].clientY - p[1].clientY), ang: Math.atan2(p[1].clientY - p[0].clientY, p[1].clientX - p[0].clientX) } : null;
+  }
+  onMove(e) {
+    const prev = this.ptrs.get(e.pointerId); if (!prev) return;
+    const dx = e.clientX - prev.clientX, dy = e.clientY - prev.clientY;
+    this.moved += Math.abs(dx) + Math.abs(dy);
+    this.ptrs.set(e.pointerId, e);
+    if (this.ptrs.size === 1) {
+      if (e.buttons & 2 || e.shiftKey) { this.yaw -= dx * 0.006; this.pitch = THREE.MathUtils.clamp(this.pitch + dy * 0.004, 0.6, 1.25); }
+      else this.pan(-dx, -dy);
+    } else if (this.ptrs.size === 2 && this.last) {
+      const p = [...this.ptrs.values()];
+      const dist = Math.hypot(p[0].clientX - p[1].clientX, p[0].clientY - p[1].clientY);
+      const ang = Math.atan2(p[1].clientY - p[0].clientY, p[1].clientX - p[0].clientX);
+      this.zoom(this.last.dist / Math.max(dist, 1));
+      this.yaw -= ang - this.last.ang;
+      this.last = { dist, ang };
+    }
+  }
+  pan(dx, dy) {
+    const s = this.dist * 0.0017, sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
+    this.target.x += (dx * cos + dy * sin) * s * -1 * -1;
+    this.target.z += (-dx * sin + dy * cos) * s;
+    const lim = 110; this.target.x = THREE.MathUtils.clamp(this.target.x, -lim, lim); this.target.z = THREE.MathUtils.clamp(this.target.z, -lim, lim);
+  }
+  zoom(f) { this.dist = THREE.MathUtils.clamp(this.dist * f, this.minDist, this.maxDist); }
+  rotate(a) { this.yaw += a; }
+  update(dt) {
+    const sp = this.dist * dt * 0.9;
+    if (this.keys.has('w')) this.pan(0, -sp / (this.dist * 0.0017));
+    if (this.keys.has('s')) this.pan(0, sp / (this.dist * 0.0017));
+    if (this.keys.has('a')) this.pan(-sp / (this.dist * 0.0017), 0);
+    if (this.keys.has('d')) this.pan(sp / (this.dist * 0.0017), 0);
+    if (this.keys.has('q')) this.yaw += dt * 1.5;
+    if (this.keys.has('e')) this.yaw -= dt * 1.5;
+    this.apply();
+  }
+  apply() {
+    this.target.y = Math.max(this.terrain.heightAt(this.target.x, this.target.z), 0);
+    const cp = Math.cos(this.pitch);
+    this.camera.position.set(
+      this.target.x + Math.sin(this.yaw) * cp * this.dist,
+      this.target.y + Math.sin(this.pitch) * this.dist,
+      this.target.z + Math.cos(this.yaw) * cp * this.dist);
+    this.camera.lookAt(this.target);
+  }
+}
+
+/** ゲーム内時間：実時間1秒 = ゲーム内1分（24分で1日） */
+class TimeManager {
+  constructor() { this.minutes = 8 * 60; this.speed = 1; }
+  update(dt) { this.minutes += dt * this.speed; }
+  get day() { return Math.floor(this.minutes / 1440) + 1; }
+  get hour() { return (this.minutes % 1440) / 60; }
+  get label() { const h = Math.floor(this.hour), m = Math.floor(this.minutes % 60); return `Day ${this.day} ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`; }
+}
+
+class UIManager {
+  constructor(game) {
+    this.game = game;
+    const $ = id => document.getElementById(id);
+    this.clock = $('clock'); this.info = $('info'); this.t = 0;
+    document.querySelectorAll('[data-t]').forEach(b => b.onclick = () => $(b.dataset.t).classList.toggle('closed'));
+    $('left').classList.add('closed'); $('right').classList.add('closed');
+    $('rot-l').onclick = () => game.cam.rotate(Math.PI / 8);
+    $('rot-r').onclick = () => game.cam.rotate(-Math.PI / 8);
+    $('zoom-in').onclick = () => game.cam.zoom(0.8);
+    $('zoom-out').onclick = () => game.cam.zoom(1.25);
+    const set = $('settings'), q = $('quality'), f = $('fps');
+    q.value = game.settings.quality; f.value = String(game.settings.fps);
+    $('btn-settings').onclick = () => set.classList.toggle('hidden');
+    $('settings-close').onclick = () => set.classList.add('hidden');
+    q.onchange = () => { game.settings.quality = q.value; game.saveSettings(); game.applyQuality(); };
+    f.onchange = () => { game.settings.fps = +f.value; game.saveSettings(); };
+    // 資源表示はSTAGE 2で実データに接続。現時点は「--」のまま（ダミー数値は表示しない）
+  }
+  setInfo(t) { this.info.textContent = t; }
+  update(dt) {
+    this.t += dt;
+    if (this.t > 0.25) { this.t = 0; this.clock.textContent = this.game.time.label; }
+  }
+}
+
+
+
+
+
+
+const QUALITY = {
+  low:   { pixelRatio: 1,   shadows: false, shadowSize: 512 },
+  mid:   { pixelRatio: 1.25, shadows: true, shadowSize: 1024 },
+  high:  { pixelRatio: 1.75, shadows: true, shadowSize: 2048 },
+  ultra: { pixelRatio: 2.5, shadows: true, shadowSize: 4096 }
+};
+
+class Game {
+  constructor(canvas) {
+    this.canvas = canvas;
+    const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && innerWidth < 1400);
+    this.settings = Object.assign({ quality: mobile ? 'mid' : 'high', fps: 0 }, JSON.parse(this.load('koc_settings') || '{}'));
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: this.settings.quality !== 'low' });
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.scene = new THREE.Scene();
+    this.scene.fog = new THREE.Fog(0x9cc4e4, 180, 520);
+    this.terrain = new Terrain();
+    this.scene.add(this.terrain.group);
+    this.cam = new CameraController(canvas, this.terrain);
+    this.time = new TimeManager();
+    this.setupLights();
+    this.raycaster = new THREE.Raycaster();
+    this.cam.onTap = e => this.pick(e);
+    this.ui = new UIManager(this);
+    this.applyQuality();
+    addEventListener('resize', () => this.resize());
+    this.resize();
+    this.clock = new THREE.Clock(); this.acc = 0;
+  }
+  load(k) { try { return localStorage.getItem(k); } catch { return null; } }
+  saveSettings() { try { localStorage.setItem('koc_settings', JSON.stringify(this.settings)); } catch {} }
+
+  setupLights() {
+    this.hemi = new THREE.HemisphereLight(0xcfe6ff, 0x5a5a3a, 0.7);
+    this.sun = new THREE.DirectionalLight(0xfff2d0, 2.2);
+    this.sun.castShadow = true;
+    const s = this.sun.shadow.camera; s.left = s.bottom = -90; s.right = s.top = 90; s.near = 1; s.far = 400;
+    this.sun.shadow.bias = -0.0005;
+    this.scene.add(this.hemi, this.sun, this.sun.target);
+  }
+  applyQuality() {
+    const q = QUALITY[this.settings.quality];
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, q.pixelRatio));
+    this.renderer.shadowMap.enabled = q.shadows;
+    this.sun.castShadow = q.shadows;
+    this.sun.shadow.mapSize.set(q.shadowSize, q.shadowSize);
+    if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
+    this.scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
+    this.resize();
+  }
+  resize() {
+    this.renderer.setSize(innerWidth, innerHeight, false);
+    this.cam.camera.aspect = innerWidth / innerHeight;
+    this.cam.camera.updateProjectionMatrix();
+  }
+  pick(e) {
+    this.raycaster.setFromCamera(new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1), this.cam.camera);
+    const hit = this.raycaster.intersectObject(this.terrain.land)[0];
+    if (!hit) return;
+    const { x, y, z } = hit.point, b = this.terrain.biomeAt(x, z, y);
+    const names = { water: '水域（建築不可）', sand: '砂地', grass: '草原', forest: '森林', rock: '岩場', peak: '山岳' };
+    this.ui.setInfo(`${names[b]}｜座標 (${x.toFixed(0)}, ${z.toFixed(0)})｜標高 ${y.toFixed(1)}`);
+  }
+  updateDayNight() {
+    const h = this.time.hour, a = ((h - 6) / 12) * Math.PI; // 6時に日の出
+    const up = Math.sin(a);
+    const t = this.cam.target;
+    this.sun.position.set(t.x + Math.cos(a) * 120, Math.max(up, 0.08) * 140 + 20, t.z + 60);
+    this.sun.target.position.copy(t);
+    this.sun.intensity = 0.15 + Math.max(up, 0) * 2.1;
+    this.hemi.intensity = 0.25 + Math.max(up, 0) * 0.55;
+    const day = new THREE.Color(0x9cc4e4), night = new THREE.Color(0x0b1226), dusk = new THREE.Color(0xe59a6a);
+    const sky = night.clone().lerp(day, THREE.MathUtils.clamp(up * 2 + 0.2, 0, 1));
+    if (Math.abs(up) < 0.25) sky.lerp(dusk, 0.35 * (1 - Math.abs(up) / 0.25));
+    this.scene.background = sky; this.scene.fog.color.copy(sky);
+  }
+  start() {
+    let accRender = 0;
+    const loop = () => {
+      requestAnimationFrame(loop);
+      const dt = Math.min(this.clock.getDelta(), 0.1);
+      accRender += dt;
+      const lim = this.settings.fps ? 1 / this.settings.fps : 0;
+      if (accRender < lim - 0.002) return;
+      const step = accRender; accRender = 0;
+      this.time.update(step);
+      this.cam.update(step);
+      this.terrain.update(this.clock.elapsedTime);
+      this.updateDayNight();
+      this.ui.update(step);
+      this.renderer.render(this.scene, this.cam.camera);
+    };
+    loop();
+  }
+}
+
+
+
+try {
+  const game = new Game(document.getElementById('view'));
+  game.start();
+  window.__game = game; // デバッグ用
+} catch (e) {
+  console.error(e);
+  document.getElementById('loading').textContent = '初期化に失敗しました: ' + e.message;
+} finally {
+  setTimeout(() => document.getElementById('loading')?.classList.add('done'), 300);
+}
+
+</script>
+</body>
+</html>
