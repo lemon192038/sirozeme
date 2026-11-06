@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>KINGDOMS OF CONQUEST</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>">
+</head>
+<body>
+<canvas id="view"></canvas>
+<header id="topbar">
+  <span class="res" title="金貨">🪙 <b id="r-gold">--</b></span>
+  <span class="res" title="食料">🌾 <b id="r-food">--</b></span>
+  <span class="res" title="木材">🪵 <b id="r-wood">--</b></span>
+  <span class="res" title="石材">🪨 <b id="r-stone">--</b></span>
+  <span class="res" title="鉄">⛓ <b id="r-iron">--</b></span>
+  <span class="res" title="人口">👥 <b id="r-pop">--</b></span>
+  <span class="res grow" id="clock">Day 1 08:00</span>
+  <button id="btn-settings">⚙</button>
+</header>
+<aside id="left" class="panel"><h3>内政</h3><p class="note">建築・住民・資源・経済・研究は STAGE 2 で実装予定です。</p></aside>
+<aside id="right" class="panel"><h3>軍事</h3><p class="note">軍隊・防衛・ワールドマップは STAGE 3 以降で実装予定です。</p></aside>
+<div id="toggles">
+  <button data-t="left">内政</button><button data-t="right">軍事</button>
+  <button id="rot-l">⟲</button><button id="rot-r">⟳</button><button id="zoom-in">＋</button><button id="zoom-out">－</button>
+</div>
+<footer id="bottom"><span id="info">地形をタップすると情報を表示します</span></footer>
+<div id="settings" class="hidden">
+  <h3>グラフィック設定</h3>
+  <label>品質
+    <select id="quality"><option value="low">低</option><option value="mid">中</option><option value="high">高</option><option value="ultra">最高</option></select>
+  </label>
+  <label>フレーム制限
+    <select id="fps"><option value="0">無制限</option><option value="30">30</option><option value="60">60</option></select>
+  </label>
+  <p class="note">※アンチエイリアスは次回起動時に反映</p>
+  <button id="settings-close">閉じる</button>
+</div>
+<div id="loading">LOADING...</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
